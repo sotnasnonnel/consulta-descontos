@@ -19,14 +19,22 @@
       box-shadow: 0 2px 10px rgba(0,0,0,.08);
     }
     h1 { margin-top: 0; }
-    .row { display: flex; gap: 10px; }
-    input {
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    input, select {
       flex: 1;
       padding: 12px;
       border: 1px solid #ccc;
       border-radius: 8px;
       font-size: 16px;
+      background: #fff;
     }
+
     button {
       padding: 12px 16px;
       border: none;
@@ -35,11 +43,17 @@
       color: white;
       font-weight: bold;
       cursor: pointer;
+      white-space: nowrap;
     }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
     .msg { margin-top: 12px; }
     .erro { color: #b00020; }
     .ok { color: #0a7d2a; }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -59,12 +73,40 @@
       color: #555;
       margin-top: 8px;
     }
+
+    .hidden {
+      display: none;
+    }
+
+    .periodo-box {
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid #e5e5e5;
+      border-radius: 10px;
+      background: #fafafa;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    @media (max-width: 640px) {
+      .row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Consulta de Valores</h1>
-    <p>Digite o CNPJ da empresa para consulta dos valores.</p>
+    <p>Digite o CNPJ da empresa para consulta.</p>
 
     <div class="row">
       <input id="cnpj" type="text" placeholder="00.000.000/0000-00" maxlength="18" />
@@ -72,18 +114,35 @@
     </div>
 
     <div id="mensagem" class="msg"></div>
+
+    <!-- Bloco de seleção de período (fica oculto até encontrar o CNPJ) -->
+    <div id="blocoPeriodo" class="periodo-box hidden">
+      <label for="periodo"><strong>Selecione a competência:</strong></label>
+      <div class="row">
+        <select id="periodo">
+          <option value="">Selecione...</option>
+        </select>
+        <button id="btnBuscarPeriodo" type="button">Buscar período</button>
+      </div>
+    </div>
+
     <div id="resultado"></div>
   </div>
 
   <script>
     const WEBHOOK_URL = "https://procint.phdengenharia.tech/api/consulta-descontos";
+
     const cnpjInput = document.getElementById("cnpj");
-    const btn = document.getElementById("btnConsultar");
+    const btnConsultar = document.getElementById("btnConsultar");
     const mensagem = document.getElementById("mensagem");
     const resultado = document.getElementById("resultado");
 
+    const blocoPeriodo = document.getElementById("blocoPeriodo");
+    const periodoSelect = document.getElementById("periodo");
+    const btnBuscarPeriodo = document.getElementById("btnBuscarPeriodo");
+
     function formatarCNPJ(v) {
-      v = v.replace(/\D/g, "").slice(0, 14);
+      v = String(v || "").replace(/\D/g, "").slice(0, 14);
       v = v.replace(/^(\d{2})(\d)/, "$1.$2");
       v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
       v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
@@ -98,12 +157,142 @@
       });
     }
 
-    cnpjInput.addEventListener("input", (e) => {
-      e.target.value = formatarCNPJ(e.target.value);
-    });
+    function limparTelaResultado() {
+      mensagem.innerHTML = "";
+      resultado.innerHTML = "";
+    }
 
-    async function consultar() {
+    function esconderPeriodo() {
+      blocoPeriodo.classList.add("hidden");
+      periodoSelect.innerHTML = '<option value="">Selecione...</option>';
+    }
+
+    function mostrarPeriodo(periodos) {
+      periodoSelect.innerHTML = '<option value="">Selecione...</option>';
+
+      (periodos || []).forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p;
+        opt.textContent = p;
+        periodoSelect.appendChild(opt);
+      });
+
+      blocoPeriodo.classList.remove("hidden");
+    }
+
+    function renderizarResultado(data) {
+      const linhas = (data.descontos || []).map(d => `
+        <tr>
+          <td>${d.tipo || "-"}</td>
+          <td>${moedaBRL(d.valor)}</td>
+        </tr>
+      `).join("");
+
+      resultado.innerHTML = `
+        <div class="muted">
+          <div><strong>Empresa:</strong> ${data.empresa?.nome || "-"}</div>
+          <div><strong>CNPJ:</strong> ${data.empresa?.cnpj || "-"}</div>
+          <div><strong>Competência:</strong> ${data.competencia || "-"}</div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Descrição</th>
+              <th>Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas || `<tr><td colspan="2">Nenhum desconto encontrado.</td></tr>`}
+          </tbody>
+        </table>
+
+        <div class="total">Total: ${moedaBRL(data.totalDescontos)}</div>
+      `;
+    }
+
+    async function postConsulta(payload) {
+      const resp = await fetch(WEBHOOK_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+          // Se usar token:
+          // "x-api-key": "SUA_CHAVE"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      let data;
+      try {
+        data = await resp.json();
+      } catch {
+        throw new Error("Resposta inválida do servidor.");
+      }
+
+      if (!resp.ok) {
+        throw new Error(data?.message || "Erro ao consultar.");
+      }
+
+      return data;
+    }
+
+    async function consultarCnpj() {
       const cnpj = cnpjInput.value.trim();
+
+      limparTelaResultado();
+      esconderPeriodo();
+
+      if (!cnpj) {
+        mensagem.innerHTML = '<span class="erro">Digite um CNPJ.</span>';
+        return;
+      }
+
+      btnConsultar.disabled = true;
+      btnConsultar.textContent = "Consultando...";
+
+      try {
+        // 1ª etapa: consulta apenas o CNPJ para obter períodos
+        const data = await postConsulta({ cnpj });
+
+        if (!data.ok) {
+          mensagem.innerHTML = `<span class="erro">${data.message || "CNPJ não encontrado."}</span>`;
+          return;
+        }
+
+        // Fluxo novo: retorna períodos
+        if (data.tipoResposta === "periodos") {
+          const periodos = Array.isArray(data.periodos) ? data.periodos : [];
+
+          if (!periodos.length) {
+            mensagem.innerHTML = '<span class="erro">Nenhuma competência encontrada para este CNPJ.</span>';
+            return;
+          }
+
+          mostrarPeriodo(periodos);
+          mensagem.innerHTML = '<span class="ok">CNPJ encontrado. Selecione a competência.</span>';
+          return;
+        }
+
+        // Compatibilidade: se backend já retornar consulta pronta
+        if (data.tipoResposta === "consulta") {
+          mensagem.innerHTML = '<span class="ok">Consulta realizada com sucesso.</span>';
+          renderizarResultado(data);
+          return;
+        }
+
+        mensagem.innerHTML = '<span class="erro">Resposta inesperada do servidor.</span>';
+      } catch (err) {
+        mensagem.innerHTML = `<span class="erro">${err.message || "Erro inesperado."}</span>`;
+      } finally {
+        btnConsultar.disabled = false;
+        btnConsultar.textContent = "Consultar";
+      }
+    }
+
+    async function consultarPeriodoSelecionado() {
+      const cnpj = cnpjInput.value.trim();
+      const competencia = periodoSelect.value;
+
       mensagem.innerHTML = "";
       resultado.innerHTML = "";
 
@@ -112,72 +301,66 @@
         return;
       }
 
-      btn.disabled = true;
-      btn.textContent = "Consultando...";
+      if (!competencia) {
+        mensagem.innerHTML = '<span class="erro">Selecione uma competência.</span>';
+        return;
+      }
+
+      btnBuscarPeriodo.disabled = true;
+      btnBuscarPeriodo.textContent = "Buscando...";
 
       try {
-        const resp = await fetch(WEBHOOK_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-            // Se usar token:
-            // "x-api-key": "SUA_CHAVE"
-          },
-          body: JSON.stringify({ cnpj })
-        });
-
-        const data = await resp.json();
-
-        if (!resp.ok) {
-          throw new Error(data.message || "Erro ao consultar.");
-        }
+        // 2ª etapa: consulta CNPJ + competência
+        const data = await postConsulta({ cnpj, competencia });
 
         if (!data.ok) {
-          mensagem.innerHTML = `<span class="erro">${data.message || "CNPJ não encontrado."}</span>`;
+          mensagem.innerHTML = `<span class="erro">${data.message || "Erro na consulta."}</span>`;
           return;
         }
 
-        mensagem.innerHTML = `<span class="ok">Consulta realizada com sucesso.</span>`;
+        if (data.tipoResposta !== "consulta") {
+          mensagem.innerHTML = '<span class="erro">Resposta inesperada ao consultar competência.</span>';
+          return;
+        }
 
-        const linhas = (data.descontos || []).map(d => `
-          <tr>
-            <td>${d.tipo || "-"}</td>
-            <td>${moedaBRL(d.valor)}</td>
-          </tr>
-        `).join("");
-
-        resultado.innerHTML = `
-          <div class="muted">
-            <div><strong>Empresa:</strong> ${data.empresa?.nome || "-"}</div>
-            <div><strong>CNPJ:</strong> ${data.empresa?.cnpj || "-"}</div>
-            <div><strong>Competência:</strong> ${data.competencia || "-"}</div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Descrição</th>
-                <th>Valor</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${linhas || `<tr><td colspan="2">Nenhum desconto encontrado.</td></tr>`}
-            </tbody>
-          </table>
-
-          <div class="total">Total de descontos: ${moedaBRL(data.totalDescontos)}</div>
-        `;
+        mensagem.innerHTML = '<span class="ok">Consulta realizada com sucesso.</span>';
+        renderizarResultado(data);
       } catch (err) {
         mensagem.innerHTML = `<span class="erro">${err.message || "Erro inesperado."}</span>`;
       } finally {
-        btn.disabled = false;
-        btn.textContent = "Consultar";
+        btnBuscarPeriodo.disabled = false;
+        btnBuscarPeriodo.textContent = "Buscar período";
       }
     }
 
-    btn.addEventListener("click", consultar);
+    // Máscara CNPJ
+    cnpjInput.addEventListener("input", (e) => {
+      e.target.value = formatarCNPJ(e.target.value);
+    });
+
+    // Se usuário alterar o CNPJ depois de já ter selecionado período, limpa tudo
+    cnpjInput.addEventListener("change", () => {
+      esconderPeriodo();
+      resultado.innerHTML = "";
+      mensagem.innerHTML = "";
+    });
+
+    // Botões / Enter
+    btnConsultar.addEventListener("click", consultarCnpj);
+    btnBuscarPeriodo.addEventListener("click", consultarPeriodoSelecionado);
+
     cnpjInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") consultar();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        consultarCnpj();
+      }
+    });
+
+    periodoSelect.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        consultarPeriodoSelecionado();
+      }
     });
   </script>
 </body>
