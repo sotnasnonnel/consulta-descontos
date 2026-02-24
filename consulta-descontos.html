@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Consulta de Descontos por CNPJ</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 0 16px;
+      background: #f7f7f7;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.08);
+    }
+    h1 { margin-top: 0; }
+    .row { display: flex; gap: 10px; }
+    input {
+      flex: 1;
+      padding: 12px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    button {
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #1f6feb;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .msg { margin-top: 12px; }
+    .erro { color: #b00020; }
+    .ok { color: #0a7d2a; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    .total {
+      font-weight: bold;
+      font-size: 18px;
+      margin-top: 12px;
+    }
+    .muted {
+      color: #555;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Consulta de Descontos</h1>
+    <p>Digite o CNPJ da empresa para consultar os descontos.</p>
+
+    <div class="row">
+      <input id="cnpj" type="text" placeholder="00.000.000/0000-00" maxlength="18" />
+      <button id="btnConsultar">Consultar</button>
+    </div>
+
+    <div id="mensagem" class="msg"></div>
+    <div id="resultado"></div>
+  </div>
+
+  <script>
+    const WEBHOOK_URL = "https://procint.phdengenharia.tech/api/consulta-descontos";
+    const cnpjInput = document.getElementById("cnpj");
+    const btn = document.getElementById("btnConsultar");
+    const mensagem = document.getElementById("mensagem");
+    const resultado = document.getElementById("resultado");
+
+    function formatarCNPJ(v) {
+      v = v.replace(/\D/g, "").slice(0, 14);
+      v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+      v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
+      v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
+      v = v.replace(/(\d{4})(\d)/, "$1-$2");
+      return v;
+    }
+
+    function moedaBRL(valor) {
+      return Number(valor || 0).toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL"
+      });
+    }
+
+    cnpjInput.addEventListener("input", (e) => {
+      e.target.value = formatarCNPJ(e.target.value);
+    });
+
+    async function consultar() {
+      const cnpj = cnpjInput.value.trim();
+      mensagem.innerHTML = "";
+      resultado.innerHTML = "";
+
+      if (!cnpj) {
+        mensagem.innerHTML = '<span class="erro">Digite um CNPJ.</span>';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Consultando...";
+
+      try {
+        const resp = await fetch(WEBHOOK_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+            // Se usar token:
+            // "x-api-key": "SUA_CHAVE"
+          },
+          body: JSON.stringify({ cnpj })
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          throw new Error(data.message || "Erro ao consultar.");
+        }
+
+        if (!data.ok) {
+          mensagem.innerHTML = `<span class="erro">${data.message || "CNPJ não encontrado."}</span>`;
+          return;
+        }
+
+        mensagem.innerHTML = `<span class="ok">Consulta realizada com sucesso.</span>`;
+
+        const linhas = (data.descontos || []).map(d => `
+          <tr>
+            <td>${d.tipo || "-"}</td>
+            <td>${moedaBRL(d.valor)}</td>
+          </tr>
+        `).join("");
+
+        resultado.innerHTML = `
+          <div class="muted">
+            <div><strong>Empresa:</strong> ${data.empresa?.nome || "-"}</div>
+            <div><strong>CNPJ:</strong> ${data.empresa?.cnpj || "-"}</div>
+            <div><strong>Competência:</strong> ${data.competencia || "-"}</div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Desconto</th>
+                <th>Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${linhas || `<tr><td colspan="2">Nenhum desconto encontrado.</td></tr>`}
+            </tbody>
+          </table>
+
+          <div class="total">Total de descontos: ${moedaBRL(data.totalDescontos)}</div>
+        `;
+      } catch (err) {
+        mensagem.innerHTML = `<span class="erro">${err.message || "Erro inesperado."}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Consultar";
+      }
+    }
+
+    btn.addEventListener("click", consultar);
+    cnpjInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") consultar();
+    });
+  </script>
+</body>
+</html>
