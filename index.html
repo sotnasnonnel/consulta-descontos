@@ -16,7 +16,7 @@
       background: #fff;
       border-radius: 12px;
       padding: 20px;
-      box-shadow: 0 2px 10px rgba(0,0,0,08);
+      box-shadow: 0 2px 10px rgba(0,0,0,.08);
     }
     h1 { margin-top: 0; }
 
@@ -120,7 +120,7 @@
       <label for="periodo"><strong>Selecione a competência:</strong></label>
       <div class="row">
         <select id="periodo">
-          <option value="">Selecione.</option>
+          <option value="">Selecione...</option>
         </select>
         <button id="btnBuscarPeriodo" type="button">Buscar período</button>
       </div>
@@ -164,11 +164,11 @@
 
     function esconderPeriodo() {
       blocoPeriodo.classList.add("hidden");
-      periodoSelect.innerHTML = '<option value="">Selecione.</option>';
+      periodoSelect.innerHTML = '<option value="">Selecione...</option>';
     }
 
     function mostrarPeriodo(periodos) {
-      periodoSelect.innerHTML = '<option value="">Selecione.</option>';
+      periodoSelect.innerHTML = '<option value="">Selecione...</option>';
 
       (periodos || []).forEach(p => {
         const opt = document.createElement("option");
@@ -181,39 +181,18 @@
     }
 
     function renderizarResultado(data) {
-      const descontosDiversos = Number(
-        data.descontosDiversos ??
-        data["Descontos Diversos"] ??
-        0
-      );
-
-      const descontos = [
-        ...(data.descontos || []),
-        {
-          tipo: "Descontos Diversos",
-          valor: descontosDiversos
-        }
-      ];
-
-      const linhas = descontos.map(d => `
+      const linhas = (data.descontos || []).map(d => `
         <tr>
           <td>${d.tipo || "-"}</td>
           <td>${moedaBRL(d.valor)}</td>
         </tr>
       `).join("");
 
-      const somaTabela = descontos.reduce((acc, d) => {
-        return acc + Number(d.valor || 0);
-      }, 0);
-
-      const totalFinal = Number(data.totalDescontos ?? somaTabela);
-
       resultado.innerHTML = `
         <div class="muted">
           <div><strong>Empresa:</strong> ${data.empresa?.nome || "-"}</div>
           <div><strong>CNPJ:</strong> ${data.empresa?.cnpj || "-"}</div>
           <div><strong>Competência:</strong> ${data.competencia || "-"}</div>
-          <div><strong>Descontos Diversos:</strong> ${moedaBRL(descontosDiversos)}</div>
         </div>
 
         <table>
@@ -228,7 +207,7 @@
           </tbody>
         </table>
 
-        <div class="total">Total: ${moedaBRL(totalFinal)}</div>
+        <div class="total">Total: ${moedaBRL(data.totalDescontos)}</div>
       `;
     }
 
@@ -237,6 +216,7 @@
         method: "POST",
         headers: {
           "Content-Type": "application/json"
+
         },
         body: JSON.stringify(payload)
       });
@@ -270,6 +250,7 @@
       btnConsultar.textContent = "Consultando...";
 
       try {
+        // 1ª etapa: consulta apenas o CNPJ para obter períodos
         const data = await postConsulta({ cnpj });
 
         if (!data.ok) {
@@ -277,6 +258,7 @@
           return;
         }
 
+        // Retorna períodos
         if (data.tipoResposta === "periodos") {
           const periodos = Array.isArray(data.periodos) ? data.periodos : [];
 
@@ -290,6 +272,7 @@
           return;
         }
 
+        // Retornar consulta pronta
         if (data.tipoResposta === "consulta") {
           mensagem.innerHTML = '<span class="ok">Consulta realizada com sucesso.</span>';
           renderizarResultado(data);
@@ -326,6 +309,7 @@
       btnBuscarPeriodo.textContent = "Buscando...";
 
       try {
+        // 2ª etapa: consulta CNPJ + competência
         const data = await postConsulta({ cnpj, competencia });
 
         if (!data.ok) {
@@ -333,13 +317,13 @@
           return;
         }
 
-        if (data.tipoResposta === "consulta") {
-          mensagem.innerHTML = '<span class="ok">Consulta realizada com sucesso.</span>';
-          renderizarResultado(data);
+        if (data.tipoResposta !== "consulta") {
+          mensagem.innerHTML = '<span class="erro">Resposta inesperada ao consultar competência.</span>';
           return;
         }
 
-        mensagem.innerHTML = '<span class="erro">Resposta inesperada do servidor.</span>';
+        mensagem.innerHTML = '<span class="ok">Consulta realizada com sucesso.</span>';
+        renderizarResultado(data);
       } catch (err) {
         mensagem.innerHTML = `<span class="erro">${err.message || "Erro inesperado."}</span>`;
       } finally {
@@ -348,21 +332,32 @@
       }
     }
 
-    cnpjInput.addEventListener("input", e => {
+    // Máscara CNPJ
+    cnpjInput.addEventListener("input", (e) => {
       e.target.value = formatarCNPJ(e.target.value);
     });
 
+    // Se usuário alterar o CNPJ depois de já ter selecionado período, limpa tudo
+    cnpjInput.addEventListener("change", () => {
+      esconderPeriodo();
+      resultado.innerHTML = "";
+      mensagem.innerHTML = "";
+    });
+
+    // Botões / Enter
     btnConsultar.addEventListener("click", consultarCnpj);
     btnBuscarPeriodo.addEventListener("click", consultarPeriodoSelecionado);
 
-    cnpjInput.addEventListener("keydown", e => {
+    cnpjInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
+        e.preventDefault();
         consultarCnpj();
       }
     });
 
-    periodoSelect.addEventListener("keydown", e => {
+    periodoSelect.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
+        e.preventDefault();
         consultarPeriodoSelecionado();
       }
     });
